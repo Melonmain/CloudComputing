@@ -91,7 +91,7 @@ create_users_table() {
             password_hash TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-    \"" 2>/dev/null || true
+    \""
 }
 
 # Create todos table
@@ -105,21 +105,20 @@ create_todos_table() {
             completed BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
-    \"" 2>/dev/null || true
+    \""
 }
 
 if [[ $INSTALL_login -eq 1 ]]; then
     echo "Creating users table..."
     create_users_table
-    echo "Users table created successfully."
+    echo "login table created successfully."
 fi
 
 if [[ $INSTALL_userdata -eq 1 ]]; then
     echo "Creating todos table..."
     create_todos_table
-    echo "Todos table created successfully."
+    echo "userdata table created successfully."
 fi
 
 echo "Database initialization complete."
