@@ -9,6 +9,7 @@
 Database query (login: postgres)
 users (
     id UUID PRIMARY KEY,
+    username TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
