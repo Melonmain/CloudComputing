@@ -26,7 +26,7 @@ todos (
 
 ### Backend
 login(username, password) -> jwt-Token (cookie)
-register()username, password)
+register(username, password)
 getData(jwt-Token) -> json
 
 ### Login Server
