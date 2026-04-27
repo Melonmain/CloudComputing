@@ -84,7 +84,9 @@ def main():
 
     # delete security groups
     for group in conn.ex_list_security_groups():
-            conn.ex_delete_security_group(group)
+        if group.name.startswith('default'):
+            continue
+        conn.ex_delete_security_group(group)
 
     # create security group dependency
     # TODO
@@ -109,6 +111,36 @@ def main():
 
 
     # create database
+    database_cloud_init_script = 'https://raw.githubusercontent.com/Melonmain/CloudComputing/refs/heads/Database/cloud-init-database.sh'
+
+    userdata_service = '#!/usr/bin/env bash\n' \
+               f'curl -L -s {database_cloud_init_script} | bash -s -- -i login'
+
+    print('Starting login database instance and wait until it is running...')
+    instance_services = conn.create_node(name='login-database',
+                                         image=image,
+                                         size=flavor,
+                                         networks=[network],
+                                         ex_keyname=KEYPAIR_NAME,
+                                         ex_userdata=userdata_service)
+    instance_services = conn.wait_until_running(nodes=[instance_services], timeout=120,
+                                                ssh_interface='private_ips')[0][0]
+    login_database_ip = instance_services.private_ips[0]
+
+    userdata_service = '#!/usr/bin/env bash\n' \
+               f'curl -L -s {database_cloud_init_script} | bash -s -- -i user'
+
+    print('Starting userdata database instance and wait until it is running...')
+    instance_services = conn.create_node(name='userdata-database',
+                                         image=image,
+                                         size=flavor,
+                                         networks=[network],
+                                         ex_keyname=KEYPAIR_NAME,
+                                         ex_userdata=userdata_service)
+    instance_services = conn.wait_until_running(nodes=[instance_services], timeout=120,
+                                                ssh_interface='private_ips')[0][0]
+    userdata_database_ip = instance_services.private_ips[0]
+
 
     # create login-service
 
