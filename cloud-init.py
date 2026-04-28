@@ -154,7 +154,13 @@ def main():
 
     # create login-service
 
-    # create backend
+    # create backend — inject DATABASE_URL pointing to userdata-database
+    database_url = f'postgresql://postgres:postgres@{userdata_database_ip}:5432/appdb'
+    backend_script = open('cloud-init-backend.sh').read()
+    backend_userdata = backend_script.replace('#!/bin/bash\n',
+        f'#!/bin/bash\nexport DATABASE_URL="{database_url}"\n')
+
+    print('Starting backend instance...')
     node_backend = conn.create_node(
         name='backend',
         image=image,
@@ -162,10 +168,23 @@ def main():
         networks=[network],
         ex_keyname=KEYPAIR_NAME,
         ex_security_groups=[sg_ssh, sg_icmp, sg_backend],
-        ex_userdata=open('cloud-init-backend.sh').read(),
+        ex_userdata=backend_userdata,
     )
+    node_backend = conn.wait_until_running(nodes=[node_backend], timeout=120,
+                                           ssh_interface='private_ips')[0][0]
 
-    # create frontend
+    # assign floating IP to backend first — frontend needs the URL at build time
+    floating_ip_backend = get_floating_ip(conn)
+    conn.ex_attach_floating_ip_to_node(node_backend, floating_ip_backend)
+    print('Backend IP: ' + floating_ip_backend.ip_address)
+
+    # create frontend — inject NEXT_PUBLIC_API_URL with backend floating IP
+    backend_api_url = f'http://{floating_ip_backend.ip_address}:8000'
+    frontend_script = open('cloud-init-frontend.sh').read()
+    frontend_userdata = frontend_script.replace('#!/bin/bash\n',
+        f'#!/bin/bash\nexport NEXT_PUBLIC_API_URL="{backend_api_url}"\n')
+
+    print('Starting frontend instance...')
     node_frontend = conn.create_node(
         name='frontend',
         image=image,
@@ -173,13 +192,10 @@ def main():
         networks=[network],
         ex_keyname=KEYPAIR_NAME,
         ex_security_groups=[sg_ssh, sg_icmp, sg_frontend],
-        ex_userdata=open('cloud-init-frontend.sh').read(),
+        ex_userdata=frontend_userdata,
     )
-
-    # assign floating IPs
-    floating_ip_backend = get_floating_ip(conn)
-    conn.ex_attach_floating_ip_to_node(node_backend, floating_ip_backend)
-    print('Backend IP: ' + floating_ip_backend.ip_address)
+    node_frontend = conn.wait_until_running(nodes=[node_frontend], timeout=120,
+                                            ssh_interface='private_ips')[0][0]
 
     floating_ip_frontend = get_floating_ip(conn)
     conn.ex_attach_floating_ip_to_node(node_frontend, floating_ip_frontend)

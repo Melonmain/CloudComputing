@@ -19,7 +19,7 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-border/60 bg-background/80 backdrop-blur-md">
-      <div className="max-w-6xl mx-auto px-6 lg:px-10 h-20 flex items-center justify-between">
+      <div className="w-full px-6 xl:px-8 h-20 flex items-center justify-between">
         {/* Brand */}
         <Link href="/dashboard" className="flex items-center gap-3 group">
           <div className="gradient-brand p-2 rounded-xl shadow-sm group-hover:shadow-md transition-shadow">

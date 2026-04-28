@@ -7,7 +7,6 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 httpx==0.28.1
 
-# Future PostgreSQL support (uncomment when ready):
-# asyncpg==0.30.0
-# sqlalchemy[asyncio]==2.0.36
-# alembic==1.14.0
+# PostgreSQL
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10

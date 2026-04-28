@@ -1,30 +1,39 @@
 from datetime import datetime
 from uuid import UUID, uuid4
-from pydantic import BaseModel, Field
 
+from pydantic import BaseModel, Field
+from sqlalchemy import Boolean, Column, DateTime, String, Text
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
+
+from app.core.database import Base
+
+
+# ── SQLAlchemy ORM model (maps to the todos table in PostgreSQL) ──────────────
+
+class TodoModel(Base):
+    __tablename__ = "todos"
+
+    id          = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id     = Column(PGUUID(as_uuid=True), nullable=False)
+    title       = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    completed   = Column(Boolean, default=False, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+# ── Pydantic schemas (used by FastAPI for request/response validation) ─────────
 
 class Todo(BaseModel):
-    """Full todo as stored / returned from the API."""
-    id: UUID = Field(default_factory=uuid4)
-    user_id: UUID = Field(default_factory=uuid4)
+    id: UUID
+    user_id: UUID
     title: str
     description: str | None = None
-    completed: bool = False
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    completed: bool
+    created_at: datetime
+    updated_at: datetime
 
-    # --- PostgreSQL migration hint ---
-    # Replace in-memory store with SQLAlchemy model:
-    #
-    # class TodoModel(Base):
-    #     __tablename__ = "todos"
-    #     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    #     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    #     title = Column(String, nullable=False)
-    #     description = Column(String, nullable=True)
-    #     completed = Column(Boolean, default=False)
-    #     created_at = Column(DateTime, default=datetime.utcnow)
-    #     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    model_config = {"from_attributes": True}
 
 
 class TodoCreate(BaseModel):

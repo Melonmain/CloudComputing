@@ -1,34 +1,49 @@
-# CloudComputing: ToDo List
-- Database (saves ToDos + users; postgres)
-- Frontend (displays data from backend)
-- Backend (executes database query; RestApi) ((scalable))
-- Login Server (userId + paswordHash; returns jwt)
+# Cloud Todo
 
-## Schnittstellen:
-### Datenbank 1
-Database query (login: postgres)
-users (
-    id UUID PRIMARY KEY,
-    password_hash TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+Cloud-native To-Do-Applikation im Rahmen des Cloud Computing Praktikums.
 
-### Datenbank 2
-todos (
-    id UUID PRIMARY KEY,
-    user_id UUID NOT NULL,
-    title TEXT NOT NULL,
-    description TEXT,
-    completed BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-);
+## Architektur
 
-### Backend
-login(username, password) -> jwt-Token (cookie)
-register(username, password)
-getData(jwt-Token) -> json
+| Komponente | Technologie | Port |
+|---|---|---|
+| Frontend | Next.js 16, TypeScript, Tailwind CSS | 3000 |
+| Backend | FastAPI, SQLAlchemy, PostgreSQL | 8000 |
+| Datenbank | PostgreSQL 16 | 5432 |
+| Infrastruktur | OpenStack / Apache Libcloud | — |
 
-### Login Server
-login(username, password) -> jwt-Token (cookie)
-register(username, password) -> jwt-Token
+## Lokale Entwicklung
+
+**Voraussetzungen:** Docker Desktop
+
+```bash
+docker-compose up --build
+```
+
+Startet Datenbank, Backend und Frontend in der richtigen Reihenfolge.
+
+| Service | URL |
+|---|---|
+| Frontend | http://localhost:3000 |
+| Backend API | http://localhost:8000 |
+| Swagger Docs | http://localhost:8000/docs |
+
+## Deployment (OpenStack)
+
+```bash
+pip install apache-libcloud
+python cloud-init.py
+```
+
+Das Skript erstellt VMs für Datenbank, Backend und Frontend, verteilt die IP-Adressen automatisch und startet alle Dienste per systemd.
+
+## Projektstruktur
+
+```
+.
+├── backend/          # FastAPI REST API
+├── frontend/         # Next.js App
+├── cloud-init.py     # OpenStack Provisioning
+├── cloud-init-backend.sh
+├── cloud-init-frontend.sh
+└── docker-compose.yml
+```
