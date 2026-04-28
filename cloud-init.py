@@ -87,7 +87,17 @@ def main():
             conn.ex_delete_security_group(group)
 
     # create security group dependency
-    # TODO
+    sg_ssh = conn.ex_create_security_group('ssh', 'SSH access')
+    conn.ex_create_security_group_rule(sg_ssh, 'tcp', 22, 22, cidr='0.0.0.0/0')
+
+    sg_icmp = conn.ex_create_security_group('icmp', 'ICMP ping')
+    conn.ex_create_security_group_rule(sg_icmp, 'icmp', -1, -1, cidr='0.0.0.0/0')
+
+    sg_backend = conn.ex_create_security_group('backend', 'FastAPI backend port 8000')
+    conn.ex_create_security_group_rule(sg_backend, 'tcp', 8000, 8000, cidr='0.0.0.0/0')
+
+    sg_frontend = conn.ex_create_security_group('frontend', 'Next.js frontend port 3000')
+    conn.ex_create_security_group_rule(sg_frontend, 'tcp', 3000, 3000, cidr='0.0.0.0/0')
 
     ###########################################################################
     #
@@ -113,6 +123,35 @@ def main():
     # create login-service
 
     # create backend
+    node_backend = conn.create_node(
+        name='backend',
+        image=image,
+        size=flavor,
+        networks=[network],
+        ex_keyname=KEYPAIR_NAME,
+        ex_security_groups=[sg_ssh, sg_icmp, sg_backend],
+        ex_userdata=open('cloud-init-backend.sh').read(),
+    )
+
+    # create frontend
+    node_frontend = conn.create_node(
+        name='frontend',
+        image=image,
+        size=flavor,
+        networks=[network],
+        ex_keyname=KEYPAIR_NAME,
+        ex_security_groups=[sg_ssh, sg_icmp, sg_frontend],
+        ex_userdata=open('cloud-init-frontend.sh').read(),
+    )
+
+    # assign floating IPs
+    floating_ip_backend = get_floating_ip(conn)
+    conn.ex_attach_floating_ip_to_node(node_backend, floating_ip_backend)
+    print('Backend IP: ' + floating_ip_backend.ip_address)
+
+    floating_ip_frontend = get_floating_ip(conn)
+    conn.ex_attach_floating_ip_to_node(node_frontend, floating_ip_frontend)
+    print('Frontend IP: ' + floating_ip_frontend.ip_address)
 
 
 if __name__ == '__main__':
