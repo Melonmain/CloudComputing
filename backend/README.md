@@ -1,77 +1,59 @@
-# Todo API — FastAPI Backend
+# Backend
 
-Cloud-native Todo REST API. Läuft im Mock-Modus (kein Datenbank-Zugriff nötig).
+FastAPI REST API mit PostgreSQL-Anbindung.
 
-## Schnellstart
+## Stack
+
+- FastAPI 0.115
+- SQLAlchemy 2.0 (sync)
+- PostgreSQL 16 (psycopg2)
+- pydantic-settings (Konfiguration via `.env`)
+
+## Lokaler Start
 
 ```bash
-cd backend
-
-# Virtuelle Umgebung erstellen und aktivieren
-python -m venv .venv
-source .venv/bin/activate        # macOS / Linux
-# .venv\Scripts\activate         # Windows
-
-# Abhängigkeiten installieren
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-
-# Server starten
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --port 8000
 ```
 
-API läuft auf → http://localhost:8000  
-Swagger UI →    http://localhost:8000/docs  
-ReDoc →         http://localhost:8000/redoc
+API: http://localhost:8000  
+Docs: http://localhost:8000/docs
 
----
+## Konfiguration
+
+| Variable | Standard | Beschreibung |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/appdb` | Datenbankverbindung |
 
 ## Endpunkte
 
-| Methode | Pfad                  | Beschreibung              |
-|---------|-----------------------|---------------------------|
-| GET     | /health               | Health-Check              |
-| GET     | /todos/               | Alle Todos abrufen        |
-| POST    | /todos/               | Neues Todo erstellen      |
-| PUT     | /todos/{todo_id}      | Todo aktualisieren        |
-| DELETE  | /todos/{todo_id}      | Todo löschen              |
-| POST    | /auth/login           | Mock-Login (setzt Cookie) |
-| POST    | /auth/register        | Mock-Registrierung        |
-| POST    | /auth/logout          | Cookie löschen            |
-
----
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| GET | `/todos/` | Alle Todos abrufen |
+| POST | `/todos/` | Todo erstellen |
+| PUT | `/todos/{id}` | Todo aktualisieren |
+| DELETE | `/todos/{id}` | Todo löschen |
+| POST | `/auth/login` | Anmelden |
+| POST | `/auth/register` | Registrieren |
+| POST | `/auth/logout` | Abmelden |
 
 ## Projektstruktur
 
 ```
 backend/
 ├── app/
-│   ├── main.py              # FastAPI App-Instanz, CORS, Router-Registrierung
+│   ├── main.py
 │   ├── core/
-│   │   └── config.py        # Settings via pydantic-settings (.env)
+│   │   ├── config.py
+│   │   └── database.py
 │   ├── models/
-│   │   └── todo.py          # Pydantic-Modelle: Todo, TodoCreate, TodoUpdate
+│   │   └── todo.py
 │   ├── routers/
-│   │   ├── todos.py         # CRUD-Endpunkte
-│   │   └── auth.py          # Mock-Auth-Endpunkte
+│   │   ├── todos.py
+│   │   └── auth.py
 │   └── services/
-│       └── todo_service.py  # Business-Logic (in-memory, austauschbar)
-├── requirements.txt
-└── README.md
+│       └── todo_service.py
+└── requirements.txt
 ```
-
----
-
-## PostgreSQL anbinden (spätere Migration)
-
-1. `requirements.txt`: Kommentar bei `asyncpg`, `sqlalchemy[asyncio]`, `alembic` entfernen.
-2. `app/core/config.py`: `database_url` befüllen.
-3. `app/models/todo.py`: SQLAlchemy-Modell `TodoModel` aus dem Kommentar aktivieren.
-4. `app/services/todo_service.py`: In-Memory-Store durch async DB-Session ersetzen.
-5. Alembic-Migrationen erstellen: `alembic init alembic && alembic revision --autogenerate`.
-
-## Login-Server anbinden
-
-- `app/routers/auth.py`: `TODO`-Kommentar ersetzen — HTTP-Call an externen Login-Server.
-- JWT aus Response auslesen und als Cookie weiterreichen.
-- `app/core/config.py`: `jwt_secret_key` aus Umgebungsvariable laden.
-- Middleware hinzufügen, die JWT aus Cookie validiert und `user_id` in Request-State speichert.
