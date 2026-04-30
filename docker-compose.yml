@@ -29,15 +29,29 @@ services:
     volumes:
       - ./backend:/app
 
+  login:
+    build: ./login
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite:///./data/login.db
+      JWT_SECRET_KEY: change-me-in-docker
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./login:/app
+      - login_data:/app/data
+
   frontend:
     build: ./frontend
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_LOGIN_URL: http://localhost:8001
     ports:
       - "3000:3000"
     depends_on:
       - backend
+      - login
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -45,3 +59,4 @@ services:
 
 volumes:
   postgres_data:
+  login_data:

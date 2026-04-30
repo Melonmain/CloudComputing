@@ -1,4 +1,5 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const LOGIN_URL = process.env.NEXT_PUBLIC_LOGIN_URL ?? "http://localhost:8001";
 
 export interface Todo {
   id: string;
@@ -27,8 +28,8 @@ export interface AuthRequest {
   password: string;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+async function request<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${baseUrl}${path}`, {
     credentials: "include",
     headers: { "Content-Type": "application/json", ...init?.headers },
     ...init,
@@ -45,46 +46,46 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   todos: {
-    list: (): Promise<Todo[]> => request("/todos/"),
+    list: (): Promise<Todo[]> => request(BACKEND_URL, "/todos/"),
 
     create: (data: TodoCreate): Promise<Todo> =>
-      request("/todos/", {
+      request(BACKEND_URL, "/todos/", {
         method: "POST",
         body: JSON.stringify(data),
       }),
 
     update: (id: string, data: TodoUpdate): Promise<Todo> =>
-      request(`/todos/${id}`, {
+      request(BACKEND_URL, `/todos/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
       }),
 
     delete: (id: string): Promise<void> =>
-      request(`/todos/${id}`, { method: "DELETE" }),
+      request(BACKEND_URL, `/todos/${id}`, { method: "DELETE" }),
 
     toggle: (todo: Todo): Promise<Todo> =>
-      request(`/todos/${todo.id}`, {
+      request(BACKEND_URL, `/todos/${todo.id}`, {
         method: "PUT",
         body: JSON.stringify({ completed: !todo.completed }),
       }),
   },
 
-  // ── Auth (mock, forwards to FastAPI which will call the real login server) ──
+  // ── Auth (standalone login service) ──
   auth: {
     login: (data: AuthRequest) =>
-      request<{ message: string; username: string }>("/auth/login", {
+      request<{ message: string; username: string; access_token: string; token_type: string }>(LOGIN_URL, "/auth/login", {
         method: "POST",
         body: JSON.stringify(data),
       }),
 
     register: (data: AuthRequest) =>
-      request<{ message: string; username: string }>("/auth/register", {
+      request<{ message: string; username: string; access_token: string; token_type: string }>(LOGIN_URL, "/auth/register", {
         method: "POST",
         body: JSON.stringify(data),
       }),
 
-    logout: () => request<{ message: string }>("/auth/logout", { method: "POST" }),
+    logout: () => request<{ message: string }>(LOGIN_URL, "/auth/logout", { method: "POST" }),
   },
 
-  health: () => request<{ status: string; version: string; mode: string }>("/health"),
+  health: () => request<{ status: string; version: string; mode: string }>(BACKEND_URL, "/health"),
 };
