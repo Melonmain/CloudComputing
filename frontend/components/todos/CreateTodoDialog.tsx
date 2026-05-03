@@ -91,15 +91,16 @@ export function CreateTodoDialog({ onCreated }: Props) {
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            <Button type="button" variant="outline" size="lg" onClick={() => setOpen(false)}>
               Abbrechen
             </Button>
             <Button
               type="submit"
+              size="lg"
               className="gradient-brand text-white border-0 hover:opacity-90"
               disabled={loading || !title.trim()}
             >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Erstellen"}
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Erstellen"}
             </Button>
           </DialogFooter>
         </form>

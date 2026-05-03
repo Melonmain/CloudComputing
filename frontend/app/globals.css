@@ -100,7 +100,7 @@
   --accent-foreground: oklch(0.92 0.05 264);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 14%);
+  --input: oklch(0.30 0.04 264);
   --ring: oklch(0.65 0.22 264);
   --chart-1: oklch(0.65 0.22 264);
   --chart-2: oklch(0.55 0.18 264);
@@ -135,6 +135,9 @@
   }
   .gradient-subtle {
     background: linear-gradient(135deg, oklch(0.98 0.005 264) 0%, oklch(0.96 0.02 290) 100%);
+  }
+  .dark .gradient-subtle {
+    background: linear-gradient(135deg, oklch(0.18 0.02 264) 0%, oklch(0.16 0.025 290) 100%);
   }
   .card-hover {
     @apply transition-all duration-200 hover:shadow-md hover:-translate-y-0.5;

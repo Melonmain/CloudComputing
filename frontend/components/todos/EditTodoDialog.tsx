@@ -92,15 +92,16 @@ export function EditTodoDialog({ todo, open, onOpenChange, onUpdated }: Props) {
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" size="lg" onClick={() => onOpenChange(false)}>
               Abbrechen
             </Button>
             <Button
               type="submit"
+              size="lg"
               className="gradient-brand text-white border-0 hover:opacity-90"
               disabled={loading || !title.trim()}
             >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Speichern"}
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Speichern"}
             </Button>
           </DialogFooter>
         </form>

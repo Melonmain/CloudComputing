@@ -27,7 +27,10 @@ export default function RegisterPage() {
     try {
       await register(username, password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Registrierung fehlgeschlagen");
+      const msg = err instanceof Error ? err.message : "";
+      setError(msg.includes("already exists")
+        ? "Benutzername bereits vergeben."
+        : msg || "Registrierung fehlgeschlagen.");
     } finally {
       setLoading(false);
     }

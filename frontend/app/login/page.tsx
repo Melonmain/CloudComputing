@@ -22,7 +22,10 @@ export default function LoginPage() {
     try {
       await login(username, password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login fehlgeschlagen");
+      const msg = err instanceof Error ? err.message : "";
+      setError(msg.includes("Invalid username or password")
+        ? "Benutzername oder Passwort falsch."
+        : msg || "Login fehlgeschlagen.");
     } finally {
       setLoading(false);
     }
