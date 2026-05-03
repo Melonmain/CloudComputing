@@ -1,3 +1,5 @@
+import { TOKEN_STORAGE_KEY } from "@/lib/auth";
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const LOGIN_URL = process.env.NEXT_PUBLIC_LOGIN_URL ?? "http://localhost:8001";
 
@@ -28,43 +30,64 @@ export interface AuthRequest {
   password: string;
 }
 
+function getAuthHeader(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function request<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
+  const { headers: initHeaders, ...restInit } = init ?? {};
   const res = await fetch(`${baseUrl}${path}`, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...init?.headers },
-    ...init,
+    headers: { "Content-Type": "application/json", ...initHeaders },
+    ...restInit,
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(body || `HTTP ${res.status}`);
+    let message = `HTTP ${res.status}`;
+    try {
+      const json = JSON.parse(body);
+      message = json.detail ?? json.message ?? body;
+    } catch {
+      message = body || message;
+    }
+    throw new Error(message);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+async function backendRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  return request<T>(BACKEND_URL, path, {
+    ...init,
+    headers: { ...getAuthHeader(), ...init?.headers },
+  });
 }
 
 // ── Todos ─────────────────────────────────────────────────────────────────────
 
 export const api = {
   todos: {
-    list: (): Promise<Todo[]> => request(BACKEND_URL, "/todos/"),
+    list: (): Promise<Todo[]> => backendRequest("/todos/"),
 
     create: (data: TodoCreate): Promise<Todo> =>
-      request(BACKEND_URL, "/todos/", {
+      backendRequest("/todos/", {
         method: "POST",
         body: JSON.stringify(data),
       }),
 
     update: (id: string, data: TodoUpdate): Promise<Todo> =>
-      request(BACKEND_URL, `/todos/${id}`, {
+      backendRequest(`/todos/${id}`, {
         method: "PUT",
         body: JSON.stringify(data),
       }),
 
     delete: (id: string): Promise<void> =>
-      request(BACKEND_URL, `/todos/${id}`, { method: "DELETE" }),
+      backendRequest(`/todos/${id}`, { method: "DELETE" }),
 
     toggle: (todo: Todo): Promise<Todo> =>
-      request(BACKEND_URL, `/todos/${todo.id}`, {
+      backendRequest(`/todos/${todo.id}`, {
         method: "PUT",
         body: JSON.stringify({ completed: !todo.completed }),
       }),

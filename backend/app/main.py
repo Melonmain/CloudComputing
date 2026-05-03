@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import Base, engine
-from app.routers import todos, auth
+from app.routers import todos
 
 # Create all tables on startup (idempotent — skips existing tables)
 Base.metadata.create_all(bind=engine)
@@ -16,14 +16,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten once frontend IP is known
+    allow_origins=settings.get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(todos.router)
-app.include_router(auth.router)
 
 
 @app.get("/health", tags=["system"])

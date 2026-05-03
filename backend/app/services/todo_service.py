@@ -30,8 +30,13 @@ def create_todo(db: Session, data: TodoCreate, user_id: UUID | None = None) -> T
     return todo
 
 
-def update_todo(db: Session, todo_id: UUID, data: TodoUpdate) -> TodoModel | None:
-    todo = get_todo(db, todo_id)
+def update_todo(
+    db: Session, todo_id: UUID, data: TodoUpdate, user_id: UUID | None = None
+) -> TodoModel | None:
+    query = db.query(TodoModel).filter(TodoModel.id == todo_id)
+    if user_id:
+        query = query.filter(TodoModel.user_id == user_id)
+    todo = query.first()
     if not todo:
         return None
     changes = {k: v for k, v in data.model_dump().items() if v is not None}
@@ -43,8 +48,11 @@ def update_todo(db: Session, todo_id: UUID, data: TodoUpdate) -> TodoModel | Non
     return todo
 
 
-def delete_todo(db: Session, todo_id: UUID) -> bool:
-    todo = get_todo(db, todo_id)
+def delete_todo(db: Session, todo_id: UUID, user_id: UUID | None = None) -> bool:
+    query = db.query(TodoModel).filter(TodoModel.id == todo_id)
+    if user_id:
+        query = query.filter(TodoModel.user_id == user_id)
+    todo = query.first()
     if not todo:
         return False
     db.delete(todo)
