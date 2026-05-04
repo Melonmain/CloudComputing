@@ -20,7 +20,7 @@ PROJECT_NETWORK = 'CloudComp' + str(group_number) + '-net'
 UBUNTU_IMAGE_NAME = "ubuntu-22.04-jammy-server-cloud-image-amd64"
 
 KEYPAIR_NAME = 'groupproject-pub'
-PUB_KEY_FILE = '~/.ssh/project.pem'
+PUB_KEY_FILE = os.path.expanduser('~/.ssh/project.pub')
 
 FLAVOR_NAME = 'm1.small'
 
