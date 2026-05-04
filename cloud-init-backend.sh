@@ -1,23 +1,39 @@
 #!/bin/bash
 # DATABASE_URL, JWT_SECRET_KEY, CORS_ORIGINS are injected by cloud-init.py before this script runs
 
+LOG=/var/log/cloud-init-backend.log
+exec > >(tee -a "$LOG") 2>&1
+set -euo pipefail
+trap 'echo "[ERROR] backend setup failed at line $LINENO — check $LOG"' ERR
+
+log() { echo "[$(date '+%H:%M:%S')] $*"; }
+
+log "=== Backend setup start ==="
+log "DATABASE_URL host: $(echo "${DATABASE_URL}" | sed 's|.*@||')"
+
+log "[1/6] apt-get update + install"
 apt-get update -y
 apt-get install -y python3-pip python3-venv git
 
-# Clone the backend from the Develop branch
+log "[2/6] git clone (branch: Develop)"
 git clone --branch Develop --single-branch \
     https://github.com/Melonmain/CloudComputing.git /opt/repo
+log "Repo cloned. Contents of /opt/repo: $(ls /opt/repo)"
 
+log "[3/6] create venv + pip install"
 python3 -m venv /opt/backend/.venv
-/opt/backend/.venv/bin/pip install -r /opt/repo/backend/requirements.txt
+/opt/backend/.venv/bin/pip install --quiet -r /opt/repo/backend/requirements.txt
+log "pip install done"
 
-# Write .env so FastAPI picks up DATABASE_URL via pydantic-settings
+log "[4/6] write .env"
 cat > /opt/repo/backend/.env <<EOF
 DATABASE_URL=${DATABASE_URL}
 JWT_SECRET_KEY=${JWT_SECRET_KEY}
 CORS_ORIGINS=${CORS_ORIGINS}
 EOF
+log ".env written"
 
+log "[5/6] write systemd unit"
 cat > /etc/systemd/system/backend.service <<SVCEOF
 [Unit]
 Description=Cloud Todo FastAPI Backend
@@ -31,11 +47,23 @@ Environment="CORS_ORIGINS=${CORS_ORIGINS}"
 ExecStart=/opt/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 SVCEOF
 
+log "[6/6] enable + start backend service"
 systemctl daemon-reload
 systemctl enable backend
 systemctl start backend
+
+sleep 3
+if systemctl is-active --quiet backend; then
+    log "=== Backend service is RUNNING ==="
+else
+    log "[ERROR] Backend service FAILED to start"
+    journalctl -u backend --no-pager -n 50
+    exit 1
+fi
