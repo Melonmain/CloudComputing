@@ -1,5 +1,6 @@
 import os
 import sys
+import secrets
 import time
 
 from libcloud.compute.providers import get_driver
@@ -25,8 +26,12 @@ FLAVOR_NAME = 'm1.small'
 
 REGION_NAME = 'RegionOne'
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 def main():
+    jwt_secret = secrets.token_hex(32)
+
     # create connection
     provider = get_driver(Provider.OPENSTACK)
     conn = provider(AUTH_USERNAME,
@@ -88,18 +93,24 @@ def main():
             continue
         conn.ex_delete_security_group(group)
 
-    # create security group dependency
+    # create security groups
     sg_ssh = conn.ex_create_security_group('ssh', 'SSH access')
     conn.ex_create_security_group_rule(sg_ssh, 'tcp', 22, 22, cidr='0.0.0.0/0')
 
     sg_icmp = conn.ex_create_security_group('icmp', 'ICMP ping')
     conn.ex_create_security_group_rule(sg_icmp, 'icmp', -1, -1, cidr='0.0.0.0/0')
 
+    sg_postgres = conn.ex_create_security_group('postgres', 'PostgreSQL port 5432')
+    conn.ex_create_security_group_rule(sg_postgres, 'tcp', 5432, 5432, cidr='0.0.0.0/0')
+
+    sg_login = conn.ex_create_security_group('login', 'Login service port 8001')
+    conn.ex_create_security_group_rule(sg_login, 'tcp', 8001, 8001, cidr='0.0.0.0/0')
+
     sg_backend = conn.ex_create_security_group('backend', 'FastAPI backend port 8000')
     conn.ex_create_security_group_rule(sg_backend, 'tcp', 8000, 8000, cidr='0.0.0.0/0')
 
-    sg_frontend = conn.ex_create_security_group('frontend', 'Next.js frontend port 3000')
-    conn.ex_create_security_group_rule(sg_frontend, 'tcp', 3000, 3000, cidr='0.0.0.0/0')
+    sg_frontend = conn.ex_create_security_group('frontend', 'Next.js frontend port 80')
+    conn.ex_create_security_group_rule(sg_frontend, 'tcp', 80, 80, cidr='0.0.0.0/0')
 
     ###########################################################################
     #
@@ -119,46 +130,78 @@ def main():
             unused_floating_ip = pool.create_floating_ip()
         return unused_floating_ip
 
+    # ── Databases ─────────────────────────────────────────────────────────────
 
-    # create database
     database_cloud_init_script = 'https://raw.githubusercontent.com/Melonmain/CloudComputing/refs/heads/Database/cloud-init-database.sh'
 
-    userdata_service = '#!/usr/bin/env bash\n' \
-               f'curl -L -s {database_cloud_init_script} | bash -s -- -i login'
+    print('Starting login-database instance...')
+    node_login_db = conn.create_node(
+        name='login-database',
+        image=image,
+        size=flavor,
+        networks=[network],
+        ex_keyname=KEYPAIR_NAME,
+        ex_security_groups=[sg_ssh, sg_icmp, sg_postgres],
+        ex_userdata='#!/usr/bin/env bash\n'
+                    f'curl -L -s {database_cloud_init_script} | bash -s -- -i login',
+    )
+    node_login_db = conn.wait_until_running(nodes=[node_login_db], timeout=120,
+                                            ssh_interface='private_ips')[0][0]
+    login_database_ip = node_login_db.private_ips[0]
+    print(f'login-database private IP: {login_database_ip}')
 
-    print('Starting login database instance and wait until it is running...')
-    instance_services = conn.create_node(name='login-database',
-                                         image=image,
-                                         size=flavor,
-                                         networks=[network],
-                                         ex_keyname=KEYPAIR_NAME,
-                                         ex_userdata=userdata_service)
-    instance_services = conn.wait_until_running(nodes=[instance_services], timeout=120,
-                                                ssh_interface='private_ips')[0][0]
-    login_database_ip = instance_services.private_ips[0]
+    print('Starting userdata-database instance...')
+    node_user_db = conn.create_node(
+        name='userdata-database',
+        image=image,
+        size=flavor,
+        networks=[network],
+        ex_keyname=KEYPAIR_NAME,
+        ex_security_groups=[sg_ssh, sg_icmp, sg_postgres],
+        ex_userdata='#!/usr/bin/env bash\n'
+                    f'curl -L -s {database_cloud_init_script} | bash -s -- -i user',
+    )
+    node_user_db = conn.wait_until_running(nodes=[node_user_db], timeout=120,
+                                           ssh_interface='private_ips')[0][0]
+    userdata_database_ip = node_user_db.private_ips[0]
+    print(f'userdata-database private IP: {userdata_database_ip}')
 
-    userdata_service = '#!/usr/bin/env bash\n' \
-               f'curl -L -s {database_cloud_init_script} | bash -s -- -i user'
+    # ── Login service ──────────────────────────────────────────────────────────
 
-    print('Starting userdata database instance and wait until it is running...')
-    instance_services = conn.create_node(name='userdata-database',
-                                         image=image,
-                                         size=flavor,
-                                         networks=[network],
-                                         ex_keyname=KEYPAIR_NAME,
-                                         ex_userdata=userdata_service)
-    instance_services = conn.wait_until_running(nodes=[instance_services], timeout=120,
-                                                ssh_interface='private_ips')[0][0]
-    userdata_database_ip = instance_services.private_ips[0]
+    login_db_url = f'postgresql://postgres:postgres@{login_database_ip}:5432/appdb'
+    login_script = open(os.path.join(BASE_DIR, 'cloud-init-login.sh')).read()
+    login_userdata = login_script.replace('#!/bin/bash\n',
+        f'#!/bin/bash\n'
+        f'export DATABASE_URL="{login_db_url}"\n'
+        f'export JWT_SECRET_KEY="{jwt_secret}"\n'
+        f'export CORS_ORIGINS="*"\n')
 
+    print('Starting login-service instance...')
+    node_login = conn.create_node(
+        name='login-service',
+        image=image,
+        size=flavor,
+        networks=[network],
+        ex_keyname=KEYPAIR_NAME,
+        ex_security_groups=[sg_ssh, sg_icmp, sg_login],
+        ex_userdata=login_userdata,
+    )
+    node_login = conn.wait_until_running(nodes=[node_login], timeout=120,
+                                         ssh_interface='private_ips')[0][0]
 
-    # create login-service
+    floating_ip_login = get_floating_ip(conn)
+    conn.ex_attach_floating_ip_to_node(node_login, floating_ip_login)
+    print('Login service IP: ' + floating_ip_login.ip_address)
 
-    # create backend — inject DATABASE_URL pointing to userdata-database
+    # ── Backend ────────────────────────────────────────────────────────────────
+
     database_url = f'postgresql://postgres:postgres@{userdata_database_ip}:5432/appdb'
-    backend_script = open('cloud-init-backend.sh').read()
+    backend_script = open(os.path.join(BASE_DIR, 'cloud-init-backend.sh')).read()
     backend_userdata = backend_script.replace('#!/bin/bash\n',
-        f'#!/bin/bash\nexport DATABASE_URL="{database_url}"\n')
+        f'#!/bin/bash\n'
+        f'export DATABASE_URL="{database_url}"\n'
+        f'export JWT_SECRET_KEY="{jwt_secret}"\n'
+        f'export CORS_ORIGINS="*"\n')
 
     print('Starting backend instance...')
     node_backend = conn.create_node(
@@ -173,16 +216,20 @@ def main():
     node_backend = conn.wait_until_running(nodes=[node_backend], timeout=120,
                                            ssh_interface='private_ips')[0][0]
 
-    # assign floating IP to backend first — frontend needs the URL at build time
     floating_ip_backend = get_floating_ip(conn)
     conn.ex_attach_floating_ip_to_node(node_backend, floating_ip_backend)
     print('Backend IP: ' + floating_ip_backend.ip_address)
 
-    # create frontend — inject NEXT_PUBLIC_API_URL with backend floating IP
+    # ── Frontend ───────────────────────────────────────────────────────────────
+    # Both API URLs must be known at build time (NEXT_PUBLIC_* are baked in by Next.js)
+
     backend_api_url = f'http://{floating_ip_backend.ip_address}:8000'
-    frontend_script = open('cloud-init-frontend.sh').read()
+    login_api_url = f'http://{floating_ip_login.ip_address}:8001'
+    frontend_script = open(os.path.join(BASE_DIR, 'cloud-init-frontend.sh')).read()
     frontend_userdata = frontend_script.replace('#!/bin/bash\n',
-        f'#!/bin/bash\nexport NEXT_PUBLIC_API_URL="{backend_api_url}"\n')
+        f'#!/bin/bash\n'
+        f'export NEXT_PUBLIC_API_URL="{backend_api_url}"\n'
+        f'export NEXT_PUBLIC_LOGIN_URL="{login_api_url}"\n')
 
     print('Starting frontend instance...')
     node_frontend = conn.create_node(
@@ -200,6 +247,11 @@ def main():
     floating_ip_frontend = get_floating_ip(conn)
     conn.ex_attach_floating_ip_to_node(node_frontend, floating_ip_frontend)
     print('Frontend IP: ' + floating_ip_frontend.ip_address)
+
+    print('\n=== Deployment complete ===')
+    print(f'Frontend:      http://{floating_ip_frontend.ip_address}')
+    print(f'Backend:       http://{floating_ip_backend.ip_address}:8000')
+    print(f'Login service: http://{floating_ip_login.ip_address}:8001')
 
 
 if __name__ == '__main__':

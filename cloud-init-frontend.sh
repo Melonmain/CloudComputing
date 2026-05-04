@@ -1,6 +1,5 @@
 #!/bin/bash
-# NEXT_PUBLIC_API_URL is injected by cloud-init.py before this script runs
-# e.g. http://<backend-floating-ip>:8000
+# NEXT_PUBLIC_API_URL and NEXT_PUBLIC_LOGIN_URL are injected by cloud-init.py before this script runs
 
 apt-get update -y
 apt-get install -y curl
@@ -16,6 +15,7 @@ git clone --branch integration --single-branch \
 # Write .env.local so Next.js embeds the correct API URL at build time
 cat > /opt/repo/frontend/.env.local <<EOF
 NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+NEXT_PUBLIC_LOGIN_URL=${NEXT_PUBLIC_LOGIN_URL}
 EOF
 
 cd /opt/repo/frontend
@@ -29,8 +29,9 @@ After=network.target
 
 [Service]
 WorkingDirectory=/opt/repo/frontend
-Environment="PORT=3000"
+Environment="PORT=80"
 Environment="NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}"
+Environment="NEXT_PUBLIC_LOGIN_URL=${NEXT_PUBLIC_LOGIN_URL}"
 ExecStart=/usr/bin/npm start
 Restart=always
 RestartSec=5

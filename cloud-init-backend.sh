@@ -1,12 +1,11 @@
 #!/bin/bash
-# DATABASE_URL is injected by cloud-init.py before this script runs
-# e.g. postgresql://postgres:postgres@<db-ip>:5432/appdb
+# DATABASE_URL, JWT_SECRET_KEY, CORS_ORIGINS are injected by cloud-init.py before this script runs
 
 apt-get update -y
 apt-get install -y python3-pip python3-venv git
 
-# Clone the backend from the integration branch
-git clone --branch integration --single-branch \
+# Clone the backend from the Develop branch
+git clone --branch Develop --single-branch \
     https://github.com/Melonmain/CloudComputing.git /opt/repo
 
 python3 -m venv /opt/backend/.venv
@@ -15,6 +14,8 @@ python3 -m venv /opt/backend/.venv
 # Write .env so FastAPI picks up DATABASE_URL via pydantic-settings
 cat > /opt/repo/backend/.env <<EOF
 DATABASE_URL=${DATABASE_URL}
+JWT_SECRET_KEY=${JWT_SECRET_KEY}
+CORS_ORIGINS=${CORS_ORIGINS}
 EOF
 
 cat > /etc/systemd/system/backend.service <<SVCEOF
@@ -25,6 +26,8 @@ After=network.target
 [Service]
 WorkingDirectory=/opt/repo/backend
 Environment="DATABASE_URL=${DATABASE_URL}"
+Environment="JWT_SECRET_KEY=${JWT_SECRET_KEY}"
+Environment="CORS_ORIGINS=${CORS_ORIGINS}"
 ExecStart=/opt/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
