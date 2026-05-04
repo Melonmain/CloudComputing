@@ -20,7 +20,7 @@ PROJECT_NETWORK = 'CloudComp' + str(group_number) + '-net'
 UBUNTU_IMAGE_NAME = "ubuntu-22.04-jammy-server-cloud-image-amd64"
 
 KEYPAIR_NAME = 'groupproject-pub'
-PUB_KEY_FILE = os.path.expanduser('~/.ssh/project.pub')
+PUB_KEY_FILE = os.path.expanduser('~/.ssh/cloudcomp.pub')
 
 FLAVOR_NAME = 'm1.small'
 
@@ -60,18 +60,14 @@ def main():
         if net.name == PROJECT_NETWORK:
             network = net
 
-    # create keypair dependency
-    print('Checking for existing SSH key pair...')
-    keypair_exists = False
+    # delete old keypair and re-import so the local key is always in sync
+    print('Syncing SSH key pair...')
     for keypair in conn.list_key_pairs():
         if keypair.name == KEYPAIR_NAME:
-            keypair_exists = True
-
-    if keypair_exists:
-        print(('Keypair ' + KEYPAIR_NAME + ' already exists. Skipping import.'))
-    else:
-        print('adding keypair...')
-        conn.import_key_pair_from_file(KEYPAIR_NAME, PUB_KEY_FILE)
+            conn.delete_key_pair(keypair)
+            print(f'Deleted old keypair {KEYPAIR_NAME}')
+    conn.import_key_pair_from_file(KEYPAIR_NAME, PUB_KEY_FILE)
+    print(f'Imported keypair from {PUB_KEY_FILE}')
 
     # destroy every instance
     for instance in conn.list_nodes():
@@ -132,7 +128,9 @@ def main():
 
     # ── Databases ─────────────────────────────────────────────────────────────
 
-    database_cloud_init_script = 'https://raw.githubusercontent.com/Melonmain/CloudComputing/refs/heads/Database/cloud-init-database.sh'
+    db_script = open(os.path.join(BASE_DIR, 'cloud-init-database.sh')).read()
+    login_db_script = db_script.replace('INSTALL_login=0', 'INSTALL_login=1')
+    user_db_script  = db_script.replace('INSTALL_userdata=0', 'INSTALL_userdata=1')
 
     print('Starting login-database instance...')
     node_login_db = conn.create_node(
@@ -142,8 +140,7 @@ def main():
         networks=[network],
         ex_keyname=KEYPAIR_NAME,
         ex_security_groups=[sg_ssh, sg_icmp, sg_postgres],
-        ex_userdata='#!/usr/bin/env bash\n'
-                    f'curl -L -s {database_cloud_init_script} | bash -s -- -i login',
+        ex_userdata=login_db_script,
     )
     node_login_db = conn.wait_until_running(nodes=[node_login_db], timeout=120,
                                             ssh_interface='private_ips')[0][0]
@@ -158,8 +155,7 @@ def main():
         networks=[network],
         ex_keyname=KEYPAIR_NAME,
         ex_security_groups=[sg_ssh, sg_icmp, sg_postgres],
-        ex_userdata='#!/usr/bin/env bash\n'
-                    f'curl -L -s {database_cloud_init_script} | bash -s -- -i user',
+        ex_userdata=user_db_script,
     )
     node_user_db = conn.wait_until_running(nodes=[node_user_db], timeout=120,
                                            ssh_interface='private_ips')[0][0]

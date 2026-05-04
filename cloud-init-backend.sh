@@ -13,7 +13,7 @@ log "DATABASE_URL host: $(echo "${DATABASE_URL}" | sed 's|.*@||')"
 
 log "[1/6] apt-get update + install"
 apt-get update -y
-apt-get install -y python3-pip python3-venv git
+apt-get install -y python3-pip python3-venv git netcat-openbsd
 
 log "[2/6] git clone (branch: Develop)"
 git clone --branch Develop --single-branch \
@@ -33,6 +33,23 @@ CORS_ORIGINS=${CORS_ORIGINS}
 EOF
 log ".env written"
 
+log "[4b/6] wait for database to accept connections"
+DB_HOST=$(echo "${DATABASE_URL}" | sed 's|.*@\(.*\):.*|\1|')
+DB_PORT=5432
+log "Polling ${DB_HOST}:${DB_PORT} (max 5 min)..."
+for i in $(seq 1 60); do
+    if nc -z "$DB_HOST" "$DB_PORT" 2>/dev/null; then
+        log "Database reachable after ${i} attempts"
+        break
+    fi
+    if [ "$i" -eq 60 ]; then
+        log "[ERROR] Database not reachable after 5 minutes"
+        exit 1
+    fi
+    log "  attempt ${i}/60 — not ready, retrying in 5s..."
+    sleep 5
+done
+
 log "[5/6] write systemd unit"
 cat > /etc/systemd/system/backend.service <<SVCEOF
 [Unit]
@@ -46,7 +63,8 @@ Environment="JWT_SECRET_KEY=${JWT_SECRET_KEY}"
 Environment="CORS_ORIGINS=${CORS_ORIGINS}"
 ExecStart=/opt/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
-RestartSec=5
+RestartSec=10
+StartLimitIntervalSec=0
 StandardOutput=journal
 StandardError=journal
 

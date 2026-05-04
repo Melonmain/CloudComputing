@@ -37,6 +37,24 @@ install_postgres() {
     done
 
     echo "PostgreSQL installed and started successfully."
+
+    # Allow remote connections (PostgreSQL only listens on localhost by default)
+    PG_CONF=$(find /etc/postgresql -name postgresql.conf | head -1)
+    PG_HBA=$(find /etc/postgresql -name pg_hba.conf | head -1)
+
+    sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" "$PG_CONF"
+    echo "host all all 0.0.0.0/0 md5" >> "$PG_HBA"
+
+    systemctl restart postgresql
+
+    # Wait again after restart
+    for i in {1..30}; do
+        if pg_isready -q 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+    echo "PostgreSQL configured for remote access."
 }
 
 while getopts i: FLAG; do
