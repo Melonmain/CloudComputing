@@ -114,17 +114,18 @@ def main():
     #
     ###########################################################################
 
+    _reserved_ips = set()
+
     def get_floating_ip(connection):
-        """A helper function to re-use available Floating IPs"""
-        unused_floating_ip = None
+        """Re-use available Floating IPs, never returning the same IP twice."""
         for float_ip in connection.ex_list_floating_ips():
-            if not float_ip.node_id:
-                unused_floating_ip = float_ip
-                break
-        if not unused_floating_ip:
-            pool = connection.ex_list_floating_ip_pools()[0]
-            unused_floating_ip = pool.create_floating_ip()
-        return unused_floating_ip
+            if not float_ip.node_id and float_ip.ip_address not in _reserved_ips:
+                _reserved_ips.add(float_ip.ip_address)
+                return float_ip
+        pool = connection.ex_list_floating_ip_pools()[0]
+        new_ip = pool.create_floating_ip()
+        _reserved_ips.add(new_ip.ip_address)
+        return new_ip
 
     # ── Databases ─────────────────────────────────────────────────────────────
 
@@ -162,6 +163,11 @@ def main():
     userdata_database_ip = node_user_db.private_ips[0]
     print(f'userdata-database private IP: {userdata_database_ip}')
 
+    # Pre-allocate frontend floating IP so backend/login can set it as CORS origin
+    floating_ip_frontend = get_floating_ip(conn)
+    frontend_origin = f'http://{floating_ip_frontend.ip_address}'
+    print(f'Pre-allocated frontend IP: {floating_ip_frontend.ip_address}')
+
     # ── Login service ──────────────────────────────────────────────────────────
 
     login_db_url = f'postgresql://postgres:postgres@{login_database_ip}:5432/appdb'
@@ -170,7 +176,7 @@ def main():
         f'#!/bin/bash\n'
         f'export DATABASE_URL="{login_db_url}"\n'
         f'export JWT_SECRET_KEY="{jwt_secret}"\n'
-        f'export CORS_ORIGINS="*"\n')
+        f'export CORS_ORIGINS="{frontend_origin}"\n')
 
     print('Starting login-service instance...')
     node_login = conn.create_node(
@@ -197,7 +203,7 @@ def main():
         f'#!/bin/bash\n'
         f'export DATABASE_URL="{database_url}"\n'
         f'export JWT_SECRET_KEY="{jwt_secret}"\n'
-        f'export CORS_ORIGINS="*"\n')
+        f'export CORS_ORIGINS="{frontend_origin}"\n')
 
     print('Starting backend instance...')
     node_backend = conn.create_node(
@@ -240,7 +246,6 @@ def main():
     node_frontend = conn.wait_until_running(nodes=[node_frontend], timeout=120,
                                             ssh_interface='private_ips')[0][0]
 
-    floating_ip_frontend = get_floating_ip(conn)
     conn.ex_attach_floating_ip_to_node(node_frontend, floating_ip_frontend)
     print('Frontend IP: ' + floating_ip_frontend.ip_address)
 

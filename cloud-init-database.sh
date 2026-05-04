@@ -88,8 +88,8 @@ setup_postgres() {
     # Create database using peer authentication (run as postgres user)
     su - postgres -c "psql -c \"CREATE DATABASE $DB_NAME;\"" 2>/dev/null || echo "Database $DB_NAME already exists."
 
-    # Create user with password
-    su - postgres -c "psql -c \"CREATE USER $DB_USER WITH PASSWORD '$DB_PASSWORD';\"" 2>/dev/null || echo "User $DB_USER already exists."
+    # Set password on postgres superuser (always — CREATE USER fails silently if it already exists)
+    su - postgres -c "psql -c \"ALTER USER $DB_USER WITH PASSWORD '$DB_PASSWORD';\""
 
     # Grant privileges
     su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;\""
