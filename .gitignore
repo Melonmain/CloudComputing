@@ -1,0 +1,17 @@
+.DS_Store
+
+# Python virtual environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Next.js
+frontend/.next/
+frontend/node_modules/
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.*.local
