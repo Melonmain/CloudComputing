@@ -4,7 +4,7 @@ import secrets
 import time
 
 from libcloud.compute.providers import get_driver
-from libcloud.compute.types import Provider
+from libcloud.compute.types import Provider, NodeState
 
 import libcloud.security
 libcloud.security.CA_CERTS_PATH = ['./root-ca.crt']
@@ -80,8 +80,11 @@ def main():
         time.sleep(3)
         instances = conn.list_nodes()
         for instance in instances:
-            nodes_still_running = True
-            print('There are still instances running, waiting for them to be destroyed...')
+            if instance.state not in (NodeState.TERMINATED, NodeState.UNKNOWN):
+                nodes_still_running = True
+                print('There are still instances running, waiting for them to be destroyed...')
+    # extra wait for OpenStack to release security group references
+    time.sleep(5)
 
     # delete security groups
     for group in conn.ex_list_security_groups():
