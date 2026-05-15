@@ -83,14 +83,6 @@ def main():
             if instance.state not in (NodeState.TERMINATED, NodeState.UNKNOWN):
                 nodes_still_running = True
                 print('There are still instances running, waiting for them to be destroyed...')
-    # extra wait for OpenStack to release security group references
-    time.sleep(5)
-
-    # delete security groups
-    for group in conn.ex_list_security_groups():
-        if group.name.startswith('default'):
-            continue
-        conn.ex_delete_security_group(group)
 
     # create security groups
     sg_ssh = conn.ex_create_security_group('ssh', 'SSH access')
