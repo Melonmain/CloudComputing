@@ -9,6 +9,9 @@ from libcloud.compute.types import Provider
 import libcloud.security
 libcloud.security.CA_CERTS_PATH = ['./root-ca.crt']
 
+# openstacksdk drives Octavia (managed load balancer); libcloud has no LB driver.
+from openstack import connection
+
 group_number = 22  # define group number
 
 AUTH_URL = 'https://10.32.4.29:5000'
@@ -17,12 +20,17 @@ AUTH_PASSWORD = 'demo'
 print(f'Using username: {AUTH_USERNAME}\n')
 PROJECT_NAME = 'CloudComp' + str(group_number)
 PROJECT_NETWORK = 'CloudComp' + str(group_number) + '-net'
+DOMAIN_NAME = 'Default'
 UBUNTU_IMAGE_NAME = "ubuntu-22.04-jammy-server-cloud-image-amd64"
 
 KEYPAIR_NAME = 'groupproject-pub'
 PUB_KEY_FILE = os.path.expanduser('~/.ssh/cloudcomp.pub')
 
 FLAVOR_NAME = 'm1.small'
+
+# How many instances of each tier to spawn behind their Octavia load balancer.
+NUM_BACKEND_INSTANCES = 1
+NUM_FRONTEND_INSTANCES = 1
 
 REGION_NAME = 'RegionOne'
 
@@ -32,7 +40,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 def main():
     jwt_secret = secrets.token_hex(32)
 
-    # create connection
+    # libcloud connection — compute (instances, keypairs, security groups)
     provider = get_driver(Provider.OPENSTACK)
     conn = provider(AUTH_USERNAME,
                     AUTH_PASSWORD,
@@ -40,6 +48,18 @@ def main():
                     ex_force_auth_version='3.x_password',
                     ex_tenant_name=PROJECT_NAME,
                     ex_force_service_region=REGION_NAME)
+
+    # openstacksdk connection — Octavia load balancers + floating IPs
+    os_conn = connection.Connection(
+        auth_url=AUTH_URL,
+        username=AUTH_USERNAME,
+        password=AUTH_PASSWORD,
+        project_name=PROJECT_NAME,
+        user_domain_name=DOMAIN_NAME,
+        project_domain_name=DOMAIN_NAME,
+        region_name=REGION_NAME,
+        verify='./root-ca.crt',
+    )
 
     # get image, flavor, network for instance creation
     images = conn.list_images()
@@ -60,6 +80,12 @@ def main():
         if net.name == PROJECT_NETWORK:
             network = net
 
+    # subnet for LB members/VIP, and external network for floating IPs (openstacksdk)
+    network_sdk = os_conn.network.find_network(PROJECT_NETWORK)
+    subnet_id = network_sdk.subnet_ids[0]
+    ext_net = next(os_conn.network.networks(is_router_external=True))
+    ext_net_id = ext_net.id
+
     # delete old keypair and re-import so the local key is always in sync
     print('Syncing SSH key pair...')
     for keypair in conn.list_key_pairs():
@@ -68,6 +94,14 @@ def main():
             print(f'Deleted old keypair {KEYPAIR_NAME}')
     conn.import_key_pair_from_file(KEYPAIR_NAME, PUB_KEY_FILE)
     print(f'Imported keypair from {PUB_KEY_FILE}')
+
+    # delete existing load balancers first (cascade removes listeners/pools/members
+    # and frees their floating IPs for reuse)
+    print('Deleting existing load balancers...')
+    for lb in os_conn.load_balancer.load_balancers():
+        print(f'Deleting load balancer {lb.name}')
+        os_conn.load_balancer.delete_load_balancer(lb, cascade=True)
+        os_conn.load_balancer.wait_for_delete(lb)
 
     # destroy every instance
     for instance in conn.list_nodes():
@@ -110,22 +144,90 @@ def main():
 
     ###########################################################################
     #
-    # get floating ip helper function
+    # floating IP helpers (openstacksdk)
     #
     ###########################################################################
 
     _reserved_ips = set()
 
-    def get_floating_ip(connection):
-        """Re-use available Floating IPs, never returning the same IP twice."""
-        for float_ip in connection.ex_list_floating_ips():
-            if not float_ip.node_id and float_ip.ip_address not in _reserved_ips:
-                _reserved_ips.add(float_ip.ip_address)
-                return float_ip
-        pool = connection.ex_list_floating_ip_pools()[0]
-        new_ip = pool.create_floating_ip()
-        _reserved_ips.add(new_ip.ip_address)
-        return new_ip
+    def get_floating_ip():
+        """Re-use an unassociated Floating IP, else allocate a new one."""
+        for fip in os_conn.network.ips():
+            if not fip.port_id and fip.floating_ip_address not in _reserved_ips:
+                _reserved_ips.add(fip.floating_ip_address)
+                return fip
+        fip = os_conn.network.create_ip(floating_network_id=ext_net_id)
+        _reserved_ips.add(fip.floating_ip_address)
+        return fip
+
+    def attach_floating_ip_to_node(node, fip):
+        """Associate a floating IP with a libcloud node via its Neutron port."""
+        port = next(iter(os_conn.network.ports(device_id=node.id)))
+        os_conn.network.update_ip(fip, port_id=port.id)
+
+    def attach_floating_ip_to_lb(lb, fip):
+        """Associate a floating IP with an Octavia LB's VIP port."""
+        os_conn.network.update_ip(fip, port_id=lb.vip_port_id)
+
+    ###########################################################################
+    #
+    # instance / load-balancer helper functions
+    #
+    ###########################################################################
+
+    def create_instances(count, base_name, security_groups, userdata):
+        """Boot `count` identical instances and return their private IPs."""
+        nodes = []
+        for i in range(count):
+            name = base_name if count == 1 else f'{base_name}-{i + 1}'
+            print(f'Starting {name} instance...')
+            nodes.append(conn.create_node(
+                name=name,
+                image=image,
+                size=flavor,
+                networks=[network],
+                ex_keyname=KEYPAIR_NAME,
+                ex_security_groups=security_groups,
+                ex_userdata=userdata,
+            ))
+        running = conn.wait_until_running(nodes=nodes, timeout=300,
+                                          ssh_interface='private_ips')
+        private_ips = [node.private_ips[0] for node, _ in running]
+        for node, _ in running:
+            print(f'{node.name} private IP: {node.private_ips[0]}')
+        return private_ips
+
+    def create_load_balancer(name, listen_port, member_ips, member_port):
+        """Create an Octavia load balancer balancing TCP traffic across member_ips."""
+        print(f'Creating Octavia load balancer {name}...')
+        lb = os_conn.load_balancer.create_load_balancer(
+            name=name, vip_subnet_id=subnet_id)
+        os_conn.load_balancer.wait_for_load_balancer(
+            lb, status='ACTIVE', failures=['ERROR'], interval=5, wait=600)
+
+        listener = os_conn.load_balancer.create_listener(
+            name=f'{name}-listener', load_balancer_id=lb.id,
+            protocol='TCP', protocol_port=listen_port)
+        os_conn.load_balancer.wait_for_load_balancer(lb, interval=5, wait=600)
+
+        pool = os_conn.load_balancer.create_pool(
+            name=f'{name}-pool', listener_id=listener.id,
+            protocol='TCP', lb_algorithm='ROUND_ROBIN')
+        os_conn.load_balancer.wait_for_load_balancer(lb, interval=5, wait=600)
+
+        os_conn.load_balancer.create_health_monitor(
+            name=f'{name}-hm', pool_id=pool.id, type='TCP',
+            delay=5, timeout=3, max_retries=3)
+        os_conn.load_balancer.wait_for_load_balancer(lb, interval=5, wait=600)
+
+        # Octavia goes PENDING_UPDATE between operations, so wait after each member.
+        for ip in member_ips:
+            os_conn.load_balancer.create_member(
+                pool.id, address=ip, protocol_port=member_port, subnet_id=subnet_id)
+            os_conn.load_balancer.wait_for_load_balancer(lb, interval=5, wait=600)
+            print(f'  added member {ip}:{member_port}')
+
+        return lb
 
     # ── Databases ─────────────────────────────────────────────────────────────
 
@@ -164,9 +266,9 @@ def main():
     print(f'userdata-database private IP: {userdata_database_ip}')
 
     # Pre-allocate frontend floating IP so backend/login can set it as CORS origin
-    floating_ip_frontend = get_floating_ip(conn)
-    frontend_origin = f'http://{floating_ip_frontend.ip_address}'
-    print(f'Pre-allocated frontend IP: {floating_ip_frontend.ip_address}')
+    floating_ip_frontend = get_floating_ip()
+    frontend_origin = f'http://{floating_ip_frontend.floating_ip_address}'
+    print(f'Pre-allocated frontend IP: {floating_ip_frontend.floating_ip_address}')
 
     # ── Login service ──────────────────────────────────────────────────────────
 
@@ -191,9 +293,9 @@ def main():
     node_login = conn.wait_until_running(nodes=[node_login], timeout=120,
                                          ssh_interface='private_ips')[0][0]
 
-    floating_ip_login = get_floating_ip(conn)
-    conn.ex_attach_floating_ip_to_node(node_login, floating_ip_login)
-    print('Login service IP: ' + floating_ip_login.ip_address)
+    floating_ip_login = get_floating_ip()
+    attach_floating_ip_to_node(node_login, floating_ip_login)
+    print('Login service IP: ' + floating_ip_login.floating_ip_address)
 
     # ── Backend ────────────────────────────────────────────────────────────────
 
@@ -205,54 +307,42 @@ def main():
         f'export JWT_SECRET_KEY="{jwt_secret}"\n'
         f'export CORS_ORIGINS="{frontend_origin}"\n')
 
-    print('Starting backend instance...')
-    node_backend = conn.create_node(
-        name='backend',
-        image=image,
-        size=flavor,
-        networks=[network],
-        ex_keyname=KEYPAIR_NAME,
-        ex_security_groups=[sg_ssh, sg_icmp, sg_backend],
-        ex_userdata=backend_userdata,
-    )
-    node_backend = conn.wait_until_running(nodes=[node_backend], timeout=120,
-                                           ssh_interface='private_ips')[0][0]
+    backend_private_ips = create_instances(
+        NUM_BACKEND_INSTANCES, 'backend',
+        [sg_ssh, sg_icmp, sg_backend], backend_userdata)
 
-    floating_ip_backend = get_floating_ip(conn)
-    conn.ex_attach_floating_ip_to_node(node_backend, floating_ip_backend)
-    print('Backend IP: ' + floating_ip_backend.ip_address)
+    # Octavia LB is the public entry point; instances stay on the private net.
+    lb_backend = create_load_balancer('backend-lb', 8000, backend_private_ips, 8000)
+    floating_ip_backend = get_floating_ip()
+    attach_floating_ip_to_lb(lb_backend, floating_ip_backend)
+    print('Backend load balancer IP: ' + floating_ip_backend.floating_ip_address)
 
     # ── Frontend ───────────────────────────────────────────────────────────────
     # Both API URLs must be known at build time (NEXT_PUBLIC_* are baked in by Next.js)
 
-    backend_api_url = f'http://{floating_ip_backend.ip_address}:8000'
-    login_api_url = f'http://{floating_ip_login.ip_address}:8001'
+    backend_api_url = f'http://{floating_ip_backend.floating_ip_address}:8000'
+    login_api_url = f'http://{floating_ip_login.floating_ip_address}:8001'
     frontend_script = open(os.path.join(BASE_DIR, 'cloud-init-frontend.sh')).read()
     frontend_userdata = frontend_script.replace('#!/bin/bash\n',
         f'#!/bin/bash\n'
         f'export NEXT_PUBLIC_API_URL="{backend_api_url}"\n'
         f'export NEXT_PUBLIC_LOGIN_URL="{login_api_url}"\n')
 
-    print('Starting frontend instance...')
-    node_frontend = conn.create_node(
-        name='frontend',
-        image=image,
-        size=flavor,
-        networks=[network],
-        ex_keyname=KEYPAIR_NAME,
-        ex_security_groups=[sg_ssh, sg_icmp, sg_frontend],
-        ex_userdata=frontend_userdata,
-    )
-    node_frontend = conn.wait_until_running(nodes=[node_frontend], timeout=120,
-                                            ssh_interface='private_ips')[0][0]
+    frontend_private_ips = create_instances(
+        NUM_FRONTEND_INSTANCES, 'frontend',
+        [sg_ssh, sg_icmp, sg_frontend], frontend_userdata)
 
-    conn.ex_attach_floating_ip_to_node(node_frontend, floating_ip_frontend)
-    print('Frontend IP: ' + floating_ip_frontend.ip_address)
+    # Frontend load balancer takes the pre-allocated floating IP (the public URL).
+    lb_frontend = create_load_balancer('frontend-lb', 80, frontend_private_ips, 80)
+    attach_floating_ip_to_lb(lb_frontend, floating_ip_frontend)
+    print('Frontend load balancer IP: ' + floating_ip_frontend.floating_ip_address)
 
     print('\n=== Deployment complete ===')
-    print(f'Frontend:      http://{floating_ip_frontend.ip_address}')
-    print(f'Backend:       http://{floating_ip_backend.ip_address}:8000')
-    print(f'Login service: http://{floating_ip_login.ip_address}:8001')
+    print(f'Frontend:      http://{floating_ip_frontend.floating_ip_address}'
+          f'  ({NUM_FRONTEND_INSTANCES} instance(s) behind LB)')
+    print(f'Backend:       http://{floating_ip_backend.floating_ip_address}:8000'
+          f'  ({NUM_BACKEND_INSTANCES} instance(s) behind LB)')
+    print(f'Login service: http://{floating_ip_login.floating_ip_address}:8001')
 
 
 if __name__ == '__main__':
