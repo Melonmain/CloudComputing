@@ -15,8 +15,8 @@ log "[1/6] apt-get update + install"
 apt-get update -y
 apt-get install -y python3-pip python3-venv git netcat-openbsd
 
-log "[2/6] git clone (branch: feature/loadBalancer2)"
-git clone --branch feature/loadBalancer2 --single-branch \
+log "[2/6] git clone (branch: main)"
+git clone --branch main --single-branch \
     https://github.com/Melonmain/CloudComputing.git /opt/repo
 log "Repo cloned. Contents of /opt/repo: $(ls /opt/repo)"
 

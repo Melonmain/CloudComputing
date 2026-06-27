@@ -21,8 +21,8 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs
 log "Node version: $(node --version) | npm version: $(npm --version)"
 
-log "[3/7] git clone (branch: feature/loadBalancer2)"
-git clone --branch feature/loadBalancer2 --single-branch \
+log "[3/7] git clone (branch: main)"
+git clone --branch main --single-branch \
     https://github.com/Melonmain/CloudComputing.git /opt/repo
 log "Repo cloned. Contents of /opt/repo: $(ls /opt/repo)"
 log "Contents of /opt/repo/frontend: $(ls /opt/repo/frontend)"
