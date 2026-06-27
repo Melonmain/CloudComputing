@@ -74,17 +74,57 @@ def main():
         if flav.name == FLAVOR_NAME:
             flavor = conn.ex_get_size(flav.id)
 
-    networks = conn.ex_list_networks()
-    network = ''
-    for net in networks:
-        if net.name == PROJECT_NETWORK:
-            network = net
-
-    # subnet for LB members/VIP, and external network for floating IPs (openstacksdk)
-    network_sdk = os_conn.network.find_network(PROJECT_NETWORK)
-    subnet_id = network_sdk.subnet_ids[0]
+    # external network for floating IPs (openstacksdk)
     ext_net = next(os_conn.network.networks(is_router_external=True))
     ext_net_id = ext_net.id
+
+    # ensure the project network / subnet / router exist — a fresh project has
+    # none, in which case find_network() returns None and the LB/instances have
+    # nowhere to attach. Each step below is idempotent.
+    network_sdk = os_conn.network.find_network(PROJECT_NETWORK)
+    if network_sdk is None:
+        print(f'Creating network {PROJECT_NETWORK}...')
+        network_sdk = os_conn.network.create_network(name=PROJECT_NETWORK)
+
+    subnets = list(os_conn.network.subnets(network_id=network_sdk.id))
+    if subnets:
+        subnet = subnets[0]
+    else:
+        print(f'Creating subnet for {PROJECT_NETWORK}...')
+        subnet = os_conn.network.create_subnet(
+            name=PROJECT_NETWORK + '-subnet',
+            network_id=network_sdk.id,
+            ip_version=4,
+            cidr='10.0.0.0/24',
+            gateway_ip='10.0.0.1',
+            is_dhcp_enabled=True,
+            dns_nameservers=['8.8.8.8'],
+        )
+    subnet_id = subnet.id
+
+    # router gives the subnet a default gateway to ext_net (SNAT for outbound
+    # internet so cloud-init can git clone, plus floating-IP connectivity)
+    router_name = PROJECT_NETWORK + '-router'
+    router = os_conn.network.find_router(router_name)
+    if router is None:
+        print(f'Creating router {router_name}...')
+        router = os_conn.network.create_router(
+            name=router_name,
+            external_gateway_info={'network_id': ext_net_id})
+    try:
+        os_conn.network.add_interface_to_router(router, subnet_id=subnet_id)
+    except Exception:
+        pass  # subnet already attached to the router
+
+    # libcloud network object for instance creation (re-list so we pick up a
+    # network we may have just created above)
+    network = ''
+    for net in conn.ex_list_networks():
+        if net.name == PROJECT_NETWORK:
+            network = net
+    if network == '':
+        raise SystemExit(
+            f'libcloud cannot see network {PROJECT_NETWORK} after creation')
 
     # delete old keypair and re-import so the local key is always in sync
     print('Syncing SSH key pair...')
@@ -117,6 +157,14 @@ def main():
             if instance.state not in (NodeState.TERMINATED, NodeState.UNKNOWN):
                 nodes_still_running = True
                 print('There are still instances running, waiting for them to be destroyed...')
+
+    # delete any leftover security groups from previous runs — otherwise the
+    # names below collide and libcloud can't resolve e.g. 'ssh' to one group
+    managed_sg_names = {'ssh', 'icmp', 'postgres', 'login', 'backend', 'frontend'}
+    for sg in conn.ex_list_security_groups():
+        if sg.name in managed_sg_names:
+            conn.ex_delete_security_group(sg)
+            print(f'Deleted old security group {sg.name}')
 
     # create security groups
     sg_ssh = conn.ex_create_security_group('ssh', 'SSH access')
@@ -198,28 +246,28 @@ def main():
         lb = os_conn.load_balancer.create_load_balancer(
             name=name, vip_subnet_id=subnet_id)
         os_conn.load_balancer.wait_for_load_balancer(
-            lb, status='ACTIVE', failures=['ERROR'], interval=5, wait=600)
+            lb.id, status='ACTIVE', failures=['ERROR'], interval=5, wait=600)
 
         listener = os_conn.load_balancer.create_listener(
             name=f'{name}-listener', load_balancer_id=lb.id,
             protocol='TCP', protocol_port=listen_port)
-        os_conn.load_balancer.wait_for_load_balancer(lb, interval=5, wait=600)
+        os_conn.load_balancer.wait_for_load_balancer(lb.id, interval=5, wait=600)
 
         pool = os_conn.load_balancer.create_pool(
             name=f'{name}-pool', listener_id=listener.id,
             protocol='TCP', lb_algorithm='ROUND_ROBIN')
-        os_conn.load_balancer.wait_for_load_balancer(lb, interval=5, wait=600)
+        os_conn.load_balancer.wait_for_load_balancer(lb.id, interval=5, wait=600)
 
         os_conn.load_balancer.create_health_monitor(
             name=f'{name}-hm', pool_id=pool.id, type='TCP',
             delay=5, timeout=3, max_retries=3)
-        os_conn.load_balancer.wait_for_load_balancer(lb, interval=5, wait=600)
+        os_conn.load_balancer.wait_for_load_balancer(lb.id, interval=5, wait=600)
 
         # Octavia goes PENDING_UPDATE between operations, so wait after each member.
         for ip in member_ips:
             os_conn.load_balancer.create_member(
                 pool.id, address=ip, protocol_port=member_port, subnet_id=subnet_id)
-            os_conn.load_balancer.wait_for_load_balancer(lb, interval=5, wait=600)
+            os_conn.load_balancer.wait_for_load_balancer(lb.id, interval=5, wait=600)
             print(f'  added member {ip}:{member_port}')
 
         return lb
