@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Stadt Land Fluss - AWS Edition</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f4f4f9;
+            text-align: center;
+            padding: 50px;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: inline-block;
+            min-width: 350px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .input-group {
+            text-align: left;
+            margin-bottom: 15px;
+        }
+
+        .input-group label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #333;
+            font-size: 1.1em;
+        }
+
+        input[type="text"] {
+            padding: 10px;
+            margin: 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            width: 100%;
+            box-sizing: border-box;
+            font-size: 1em;
+        }
+
+        input[readonly] {
+            background-color: #e9ecef;
+            cursor: not-allowed;
+            color: #6c757d;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 10px;
+            width: 100%;
+            font-size: 1.1em;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .player-list {
+            text-align: left;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+
+        .player-list li span {
+            color: #dc3545;
+            font-weight: bold;
+            font-size: 0.8em;
+            margin-left: 5px;
+        }
+
+        .review-card {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            text-align: left;
+        }
+
+        .review-card strong {
+            color: #007bff;
+            font-size: 1.1em;
+        }
+
+        .letter-display {
+            font-size: 3em;
+            font-weight: bold;
+            color: #007bff;
+            margin: 15px 0;
+            border: 3px dashed #007bff;
+            display: inline-block;
+            padding: 10px 30px;
+            border-radius: 10px;
+            background: #f8f9fa;
+        }
+
+        .room-badge {
+            background: #ffc107;
+            color: #333;
+            font-weight: bold;
+            padding: 5px 15px;
+            border-radius: 20px;
+            display: inline-block;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Stadt Land Fluss</h1>
+
+        <div id="roomBadgeContainer" class="hidden">
+            <div class="room-badge" id="roomBadgeDisplay">Room: ---</div>
+        </div>
+
+        <div id="screen-landing" class="hidden">
+            <h3>Welcome to the Game</h3>
+            <p>Create a new room to invite your friends!</p>
+            <button type="button" onclick="createRoom()">Create New Room</button>
+        </div>
+
+        <div id="screen-login" class="hidden">
+            <h3>Enter your name</h3>
+            <input type="text" id="playerNameInput" placeholder="Your Name..."
+                onkeypress="if(event.key === 'Enter') joinGame()">
+            <button type="button" onclick="joinGame()">Join Room</button>
+        </div>
+
+        <div id="screen-lobby" class="hidden">
+            <h3>Lobby</h3>
+            <button type="button" class="btn-secondary" onclick="copyInviteLink()"
+                style="margin-bottom: 15px; font-size: 0.9em; padding: 8px;">📋 Copy Invite Link</button>
+            <div class="player-list">
+                <strong>Players connected:</strong>
+                <ul id="playerListUI"></ul>
+            </div>
+            <div class="input-group">
+                <label>Categories (comma separated):</label>
+                <input type="text" id="categoriesInput" value="Stadt, Land, Fluss, Tier, Beruf"
+                    onchange="pushCategories()">
+            </div>
+            <button type="button" id="startBtn" onclick="startGame()">Start Game</button>
+            <p id="hostWaitingMsg" class="hidden" style="color: #007bff; font-weight: bold; margin-top: 15px;">Waiting
+                for Host to start...</p>
+        </div>
+
+        <div id="screen-playing" class="hidden">
+            <h3>Round Active!</h3>
+            <div class="letter-display" id="currentLetterDisplay">?</div>
+            <div id="inputsContainer"></div>
+            <button type="button" id="submitBtn" onclick="submitAnswers()">Submit Answers</button>
+            <p id="waitingMsg" class="hidden"
+                style="color: #28a745; font-weight: bold; font-size: 1.1em; margin-top: 15px;">Waiting for other
+                players...</p>
+        </div>
+
+        <div id="screen-review" class="hidden">
+            <h2 id="reviewCategoryTitle">Category</h2>
+            <div id="reviewAnswersContainer"></div>
+            <button type="button" id="nextReviewBtn" onclick="nextReview()">Next Category</button>
+        </div>
+    </div>
+
+    <script>
+        let myName = "";
+        let currentCategories = [];
+        let lastState = "";
+        let ws = null;
+
+        // Extract Room ID from URL (e.g., ?room=ABCD)
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomId = urlParams.get('room');
+
+        // REPLACE with your API Gateway WebSocket URL
+        const WSS_URL = 'wss://4dfoguhtth.execute-api.us-east-1.amazonaws.com/prod/';
+
+        // Boot Sequence
+        window.onload = () => {
+            if (roomId) {
+                // If URL has a room, show the login screen and initialize WebSocket
+                document.getElementById('roomBadgeContainer').classList.remove('hidden');
+                document.getElementById('roomBadgeDisplay').innerText = `Room: ${roomId}`;
+                document.getElementById('screen-login').classList.remove('hidden');
+                initWebSocket();
+            } else {
+                // If no room, show the landing page to create one
+                document.getElementById('screen-landing').classList.remove('hidden');
+            }
+        };
+
+        // Generates a random 5-letter code and redirects the browser
+        function createRoom() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+            let newRoom = '';
+            for (let i = 0; i < 5; i++) {
+                newRoom += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            // Redirects to current URL but appends ?room=NEWROOM
+            window.location.href = window.location.pathname + "?room=" + newRoom;
+        }
+
+        // Copies the current URL so the user can paste it to friends
+        function copyInviteLink() {
+            navigator.clipboard.writeText(window.location.href).then(() => {
+                alert("Invite link copied to clipboard!");
+            }).catch(err => {
+                console.error("Failed to copy link: ", err);
+            });
+        }
+
+        function initWebSocket() {
+            ws = new WebSocket(WSS_URL);
+            ws.onopen = () => {
+                console.log("Connected to AWS API Gateway!");
+                if (myName) apiCall('join'); 
+            };
+            ws.onmessage = (event) => {
+                const state = JSON.parse(event.data);
+                updateUI(state);
+            };
+            ws.onclose = () => {
+                console.log("Disconnected. Reconnecting...");
+                setTimeout(initWebSocket, 2000);
+            };
+        }
+
+        function apiCall(action, extraData = {}) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                // We now pass the dynamic roomId with every request!
+                const payload = { action: action, playerName: myName, roomId: roomId, ...extraData };
+                ws.send(JSON.stringify(payload));
+            } else {
+                alert("Connection lost. Please wait for reconnect.");
+            }
+        }
+
+        function joinGame() {
+            const nameInput = document.getElementById('playerNameInput').value.trim();
+            if (!nameInput) return alert("Please enter a name");
+            myName = nameInput;
+            
+            apiCall('join');
+            document.getElementById('screen-login').classList.add('hidden');
+        }
+
+        function pushCategories() {
+            const catString = document.getElementById('categoriesInput').value;
+            const cats = catString.split(',').map(c => c.trim()).filter(c => c);
+            apiCall('update_categories', { categories: cats });
+        }
+
+        function startGame() {
+            const catString = document.getElementById('categoriesInput').value;
+            const cats = catString.split(',').map(c => c.trim()).filter(c => c);
+            apiCall('start', { categories: cats });
+        }
+
+        function submitAnswers() {
+            let answers = {};
+            currentCategories.forEach(cat => {
+                const inputElement = document.getElementById(`input-${cat}`);
+                if(inputElement) answers[cat] = inputElement.value;
+            });
+            
+            document.getElementById('submitBtn').classList.add('hidden');
+            document.getElementById('waitingMsg').classList.remove('hidden');
+            
+            apiCall('submit', { answers: answers });
+        }
+
+        function nextReview() {
+            apiCall('next_review');
+        }
+
+        function updateUI(state) {
+            if (state.error) { console.error(state.error); return; }
+
+            if (!myName) {
+                document.getElementById('screen-login').classList.remove('hidden');
+                document.getElementById('screen-lobby').classList.add('hidden');
+                document.getElementById('screen-playing').classList.add('hidden');
+                document.getElementById('screen-review').classList.add('hidden');
+                return; 
+            }
+
+            if (myName && (!state.players || !state.players[myName])) {
+                myName = ""; 
+                document.getElementById('screen-lobby').classList.add('hidden');
+                document.getElementById('screen-playing').classList.add('hidden');
+                document.getElementById('screen-review').classList.add('hidden');
+                document.getElementById('screen-login').classList.remove('hidden');
+                document.getElementById('playerNameInput').value = "";
+                return; 
+            }
+
+            document.getElementById('screen-login').classList.add('hidden');
+            document.getElementById('screen-lobby').classList.add('hidden');
+            document.getElementById('screen-playing').classList.add('hidden');
+            document.getElementById('screen-review').classList.add('hidden');
+            document.getElementById(`screen-${state.state}`).classList.remove('hidden');
+
+            const isHost = (myName === state.host);
+
+            if (state.state === 'lobby') {
+                const listUI = document.getElementById('playerListUI');
+                listUI.innerHTML = "";
+                for (let p in state.players) {
+                    let li = document.createElement('li');
+                    li.innerText = p;
+                    if (p === state.host) li.innerHTML += " <span>(HOST)</span>";
+                    listUI.appendChild(li);
+                }
+                
+                document.getElementById('submitBtn').classList.remove('hidden');
+                document.getElementById('waitingMsg').classList.add('hidden');
+
+                const catInput = document.getElementById('categoriesInput');
+                const startBtn = document.getElementById('startBtn');
+                const waitMsg = document.getElementById('hostWaitingMsg');
+
+                if (isHost) {
+                    catInput.readOnly = false;
+                    startBtn.classList.remove('hidden');
+                    waitMsg.classList.add('hidden');
+                    if (document.activeElement !== catInput && state.categories) {
+                        catInput.value = state.categories.join(', ');
+                    }
+                } else {
+                    catInput.readOnly = true;
+                    startBtn.classList.add('hidden');
+                    waitMsg.classList.remove('hidden');
+                    waitMsg.innerText = `Waiting for Host (${state.host}) to start...`;
+                    if (state.categories) {
+                        catInput.value = state.categories.join(', ');
+                    }
+                }
+            }
+
+            if (state.state === 'playing') {
+                document.getElementById('currentLetterDisplay').innerText = state.current_letter || "?";
+
+                if (lastState !== 'playing') {
+                    currentCategories = state.categories;
+                    const container = document.getElementById('inputsContainer');
+                    container.innerHTML = "";
+                    currentCategories.forEach(cat => {
+                        container.innerHTML += `
+                            <div class="input-group">
+                                <label for="input-${cat}">${cat}</label>
+                                <input type="text" id="input-${cat}" placeholder="Answer for ${cat}...">
+                            </div>
+                        `;
+                    });
+                }
+            }
+
+            if (state.state === 'review') {
+                const catIndex = state.review_index;
+                const nextReviewBtn = document.getElementById('nextReviewBtn');
+                
+                if (isHost) nextReviewBtn.classList.remove('hidden');
+                else nextReviewBtn.classList.add('hidden');
+
+                if (catIndex < state.categories.length) {
+                    const currentCat = state.categories[catIndex];
+                    document.getElementById('reviewCategoryTitle').innerText = `Category: ${currentCat} (Letter: ${state.current_letter})`;
+                    
+                    const answersContainer = document.getElementById('reviewAnswersContainer');
+                    answersContainer.innerHTML = "";
+                    
+                    for (let p in state.players) {
+                        const playerAnswer = state.players[p].answers[currentCat] || "---";
+                        answersContainer.innerHTML += `
+                            <div class="review-card">
+                                <strong>${p}:</strong> ${playerAnswer}
+                            </div>
+                        `;
+                    }
+                }
+            }
+
+            lastState = state.state;
+        }
+    </script>
+</body>
+
+</html>
