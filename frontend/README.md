@@ -24,7 +24,17 @@ App läuft auf http://localhost:3000
 
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_LOGIN_URL=http://localhost:8001
 ```
+
+| Variable | Beschreibung |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | Basis-URL des Backends (im Deployment der `backend-lb`) |
+| `NEXT_PUBLIC_LOGIN_URL` | Basis-URL des Login-Service |
+
+> **Wichtig:** `NEXT_PUBLIC_*`-Variablen werden zur **Build-Zeit** in das Bundle
+> eingebacken. Im Cloud-Deployment setzt [`cloud-init.py`](../cloud-init.py) sie vor dem
+> `npm build` auf die jeweiligen Floating-IPs.
 
 ## Build (Produktion)
 
@@ -32,6 +42,12 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 npm run build
 npm start
 ```
+
+## Deployment
+
+Im Cloud-Deployment wird das Frontend per cloud-init gebaut und als `systemd`-Service auf
+Port 80 hinter dem Octavia-Load-Balancer `frontend-lb` betrieben. Siehe
+[Haupt-README](../README.md).
 
 ## Projektstruktur
 

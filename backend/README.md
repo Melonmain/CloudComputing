@@ -23,9 +23,22 @@ Docs: http://localhost:8000/docs
 
 ## Konfiguration
 
+Konfiguration via Umgebungsvariablen (oder `.env`). Im Cloud-Deployment werden diese
+von [`cloud-init.py`](../cloud-init.py) automatisch gesetzt.
+
 | Variable | Standard | Beschreibung |
 |---|---|---|
-| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/appdb` | Datenbankverbindung |
+| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/appdb` | Verbindung zur `userdata-database` (Tabelle `todos`) |
+| `JWT_SECRET_KEY` | `CHANGE_ME_IN_PRODUCTION` | Secret zum Validieren der JWTs (muss mit dem Login-Service übereinstimmen) |
+| `JWT_ALGORITHM` | `HS256` | Signaturalgorithmus der JWTs |
+| `CORS_ORIGINS` | `http://localhost:3000` | Erlaubte Origins (kommagetrennt); im Deployment die Frontend-Floating-IP |
+
+## Deployment
+
+Im Cloud-Deployment läuft der Backend als `systemd`-Service auf Port 8000 hinter dem
+Octavia-Load-Balancer `backend-lb`. Da der Service zustandslos ist (gemeinsame DB,
+gemeinsames `JWT_SECRET_KEY`), kann er über `NUM_BACKEND_INSTANCES` horizontal skaliert
+werden. Siehe [Haupt-README](../README.md).
 
 ## Endpunkte
 
